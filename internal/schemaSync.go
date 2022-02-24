@@ -17,8 +17,8 @@ type SchemaSync struct {
 func NewSchemaSync(config *Config) *SchemaSync {
 	s := new(SchemaSync)
 	s.Config = config
-	s.SourceDb = NewMyDb(config.SourceDSN, "source")
-	s.DestDb = NewMyDb(config.DestDSN, "dest")
+	s.SourceDb = NewMyDb(config.SourceDSN, config.SourceType, "source", config.SourceCluster)
+	s.DestDb = NewMyDb(config.DestDSN, config.DestType, "dest", config.DestCluster)
 	return s
 }
 
@@ -77,6 +77,14 @@ func (sc *SchemaSync) getAlterDataByTable(table string, cfg *Config) *TableAlter
 	if dSchema == "" {
 		alter.Type = alterTypeCreate
 		alter.Comment = "目标数据库不存在，创建"
+		/*if dDriver == DRIVER_CLICKHOUSE {
+			// clickhouse 分布式表处理
+			sLocalSchema := sc.SourceDb.GetTableSchema(table + "_local")
+			alter.SQL = append(alter.SQL, sLocalSchema+";")
+		}*/
+		if sc.DestDb.cluster != "" {
+			sSchema = strings.Replace(sSchema, sc.SourceDb.cluster, sc.DestDb.cluster, 1)
+		}
 		alter.SQL = append(alter.SQL, sSchema+";")
 		return alter
 	}

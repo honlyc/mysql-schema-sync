@@ -11,8 +11,16 @@ type Config struct {
 	// SourceDSN 同步的源头
 	SourceDSN string `json:"source"`
 
+	SourceType string `json:"source_type"`
+
+	SourceCluster string `json:"source_cluster"`
+
 	// DestDSN 将被同步
 	DestDSN string `json:"dest"`
+
+	DestType string `json:"dest_type"`
+
+	DestCluster string `json:"dest_cluster"`
 
 	// AlterIgnore 忽略配置， eg:   "tb1*":{"column":["aaa","a*"],"index":["aa"],"foreign":[]}
 	AlterIgnore map[string]*AlterIgnoreTable `json:"alter_ignore"`

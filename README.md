@@ -1,34 +1,38 @@
 # mysql-schema-sync
-MySQL Schema 自动同步工具  
+
+MySQL/Clickhouse Schema 自动同步工具
 
 用于将 `线上` 数据库 Schema <b>变化</b>同步到 `本地测试环境`!   
 只同步 Schema、不同步数据。
 
-支持功能：  
-1.  同步**新表**  
-2.  同步**字段** 变动：新增、修改  
-3.  同步**索引** 变动：新增、修改   
-4.  支持**预览**（只对比不同步变动）  
-5.  **邮件**通知变动结果    
-6.  支持屏蔽更新**表、字段、索引、外键**  
-7.  支持本地比线上额外多一些表、字段、索引、外键
-8.  在该项目的基础上修复了比对过程中遇到分区表会终止后续操作的问题，支持分区表，对于分区表，会同步除了分区以外的变更。
-9.  支持每条 ddl 只会执行单个的修改，目的兼容tidb ddl问题 Unsupported multi schema change，通过single_schema_change字段控制，默认关闭。
+支持功能：
 
+1. 同步**新表**
+2. 同步**字段** 变动：新增、修改
+3. 同步**索引** 变动：新增、修改
+4. 支持**预览**（只对比不同步变动）
+5. **邮件**通知变动结果
+6. 支持屏蔽更新**表、字段、索引、外键**
+7. 支持本地比线上额外多一些表、字段、索引、外键
+8. 在该项目的基础上修复了比对过程中遇到分区表会终止后续操作的问题，支持分区表，对于分区表，会同步除了分区以外的变更。
+9. 支持每条 ddl 只会执行单个的修改，目的兼容tidb ddl问题 Unsupported multi schema change，通过single_schema_change字段控制，默认关闭。
+10. 支持``Clickhouse``之间的同步
 
 ### 安装
+
 ```bash
-go install github.com/hidu/mysql-schema-sync@master
+go install github.com/honlyc/mysql-schema-sync@master
 ```
 
-
 ### 配置
-参考 默认配置文件  config.json 配置同步源、目的地址。  
-修改邮件接收人  当运行失败或者有表结构变化的时候你可以收到邮件通知。  
+
+参考 默认配置文件 config.json 配置同步源、目的地址。  
+修改邮件接收人 当运行失败或者有表结构变化的时候你可以收到邮件通知。
 
 默认情况不会对多出的**表、字段、索引、外键**删除。若需要删除**字段、索引、外键** 可以使用 <code>-drop</code> 参数。
 
-配置示例(config.json):  
+##### mysql 配置示例(config.json):
+
 ```
 {
       //source：同步源
@@ -56,32 +60,78 @@ go install github.com/hidu/mysql-schema-sync@master
 }
 ```
 
+##### clickhouse 配置示例
+
+```
+{
+      //source：同步源
+      "source":"clickhouse://test:test@127.0.0.1:9000/test_0",
+      "source_type": "clickhouse",
+      //dest：待同步的数据库
+      "dest":"clickhouse://test:test@127.0.0.1:9000/test_1",
+      "dest_type": "clickhouse",
+      //alter_ignore： 同步时忽略的字段和索引
+      "alter_ignore":{
+        "tb1*":{
+            "column":["aaa","a*"],
+            "index":["aa"],
+            "foreign":[]
+        }
+      },
+      //  tables: table to check schema,default is all.eg :["order_*","goods"]
+      "tables":[],
+      //有变动或者失败时，邮件接收人
+      "email":{
+          "send_mail":false,
+         "smtp_host":"smtp.163.com:25",
+         "from":"xxx@163.com",
+         "password":"xxx",
+         "to":"xxx@163.com"
+      }
+}
+```
+
+**特别说明，针对``clickhouse``的分布式表和本地表，如果是需要都同步，则建议先同步本地表，然后再同步分布式表**
+
 #### json配置项说明
-source: 数据库同步源  
-dest:   待同步的数据库  
-tables： 数组，配置需要同步的表，为空则是不限制，eg: ["goods","order_*"]  
-alter_ignore： 忽略修改的配置，表名为tableName，可以配置 column 和 index，支持通配符 *  
-email ： 同步完成后发送邮件通知信息  
-single_schema_change：是否每个ddl只执行单个修改
+
+|字段|说明|
+|---|---|
+|source| 数据库同步源|  
+|source_type| 表示数据库类型，当前支持：``mysql``、``clickhouse``，默认为``mysql``|
+|source_cluster| 表示``clickhouse``的集群，在源集群与目标集群不一致时使用|
+|dest|   待同步的数据库|  
+|dest_type| 表示数据库类型，当前支持：``mysql``、``clickhouse``，默认为``mysql``|
+|dest_cluster| 表示``clickhouse``的集群，在源集群与目标集群不一致时使用，会将源集群名称替换为目标集群名称|
+|tables| 数组，配置需要同步的表，为空则是不限制，eg: ["goods","order_*"]|  
+|alter_ignore| 忽略修改的配置，表名为tableName，可以配置 column 和 index，支持通配符 *|  
+|email|： 同步完成后发送邮件通知信息|  
+|single_schema_change|是否每个ddl只执行单个修改|
+
 ### 运行
+
 ### 直接运行
+
 ```
 mysql-schema-sync -conf mydb_conf.json -sync
 ```
- 
+
 ### 预览并生成变更sql
+
 ```
 mysql-schema-sync -conf mydb_conf.json 2>/dev/null >db_alter.sql
 ```
+
 ### 使用shell调度
+
 ```
 bash check.sh
 ```
 
-每个json文件配置一个目的数据库，check.sh脚本会依次运行每份配置。
-log存储在当前的log目录中。
+每个json文件配置一个目的数据库，check.sh脚本会依次运行每份配置。 log存储在当前的log目录中。
 
 ### 自动定时运行
+
 添加crontab 任务
 
 <code>
@@ -89,6 +139,7 @@ log存储在当前的log目录中。
 </code>
 
 ### 参数说明
+
 <code>
 mysql-schema-sync [-conf] [-dest] [-source] [-sync] [-drop]
 </code>
