@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2" // mysql driver
 	_ "github.com/go-sql-driver/mysql"         // mysql driver
@@ -26,9 +27,15 @@ type MyDb struct {
 func NewMyDb(dsn string, dbDriver string, dbType string, cluster string) *MyDb {
 	driver := "mysql"
 	driverType := DRIVER_MYSQL
-	if dbDriver != "" {
+	switch dbDriver {
+	case "mysql":
+		driver = "mysql"
+		driverType = DRIVER_MYSQL
+		break
+	case "clickhouse":
 		driver = dbDriver
 		driverType = DRIVER_CLICKHOUSE
+		break
 	}
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
@@ -110,6 +117,57 @@ func (db *MyDb) GetTableSchema(name string) (schema string) {
 		}
 	}
 	return
+}
+
+// GetDescTableSchema desc table schema
+func (db *MyDb) GetDescTableSchema(database, name string) (schema string) {
+	rs, err := db.Query(fmt.Sprintf("desc table `%s`.`%s`", database, name))
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer rs.Close()
+	columns, _ := rs.Columns()
+	var fields []string
+	for rs.Next() {
+		if db.dbDriver == DRIVER_MYSQL {
+			var vname string
+			if err := rs.Scan(&vname, &schema); err != nil {
+				panic(fmt.Sprintf("get table %s 's schema failed, %s", name, err))
+			}
+		} else {
+			var values = make([]interface{}, len(columns))
+			valuePtrs := make([]interface{}, len(columns))
+			for i := range columns {
+				valuePtrs[i] = &values[i]
+			}
+			if err := rs.Scan(valuePtrs...); err != nil {
+				panic("show tables failed when scan," + err.Error())
+			}
+			var valObj = make(map[string]interface{})
+			for i, col := range columns {
+				var v interface{}
+				val := values[i]
+				b, ok := val.([]byte)
+				if ok {
+					v = string(b)
+				} else {
+					v = val
+				}
+				valObj[col] = v
+			}
+			fields = append(fields, parseField(valObj))
+		}
+	}
+	schema = strings.Join(fields, "\n")
+	return
+}
+
+func parseField(obj map[string]interface{}) string {
+	str := "`%s` %s %s %s"
+	sprintf := fmt.Sprintf(str, obj["name"], obj["type"], obj["default_type"],
+		obj["default_expression"])
+	return sprintf
 }
 
 // Query execute sql query

@@ -13,6 +13,19 @@ type SchemaSync struct {
 	DestDb   *MyDb
 }
 
+var changeMap = map[string]string{
+	"clickhouse": "MODIFY COLUMN",
+	"mysql":      "CHANGE",
+}
+var addMap = map[string]string{
+	"clickhouse": "ADD COLUMN",
+	"mysql":      "ADD",
+}
+var dropMap = map[string]string{
+	"clickhouse": "DROP COLUMN",
+	"mysql":      "DROP",
+}
+
 // NewSchemaSync 对一个配置进行同步
 func NewSchemaSync(config *Config) *SchemaSync {
 	s := new(SchemaSync)
@@ -57,13 +70,23 @@ func RemoveTableSchemaConfig(schema string) string {
 }
 
 func (sc *SchemaSync) getAlterDataByTable(table string, cfg *Config) *TableAlterData {
+	return sc.getAlterDataByDatabaseTable("obs", table, cfg)
+}
+
+func (sc *SchemaSync) getAlterDataByDatabaseTable(database, table string, cfg *Config) *TableAlterData {
 	alter := new(TableAlterData)
 	alter.Table = table
 	alter.Type = alterTypeNo
 
 	sSchema := sc.SourceDb.GetTableSchema(table)
 	dSchema := sc.DestDb.GetTableSchema(table)
-	alter.SchemaDiff = newSchemaDiff(table, RemoveTableSchemaConfig(sSchema), RemoveTableSchemaConfig(dSchema))
+	if sc.DestDb.dbDriver == DRIVER_CLICKHOUSE {
+		sSchema = sc.SourceDb.GetDescTableSchema(database, table)
+		dSchema = sc.DestDb.GetDescTableSchema(database, table)
+		alter.SchemaDiff = newCHSchemaDiff(table, RemoveTableSchemaConfig(sSchema), RemoveTableSchemaConfig(dSchema))
+	} else {
+		alter.SchemaDiff = newSchemaDiff(table, RemoveTableSchemaConfig(sSchema), RemoveTableSchemaConfig(dSchema))
+	}
 
 	if sSchema == dSchema {
 		return alter
@@ -96,10 +119,17 @@ func (sc *SchemaSync) getAlterDataByTable(table string, cfg *Config) *TableAlter
 	alter.Type = alterTypeAlter
 	if cfg.SingleSchemaChange {
 		for _, diffSql := range diff {
-			alter.SQL = append(alter.SQL, fmt.Sprintf("ALTER TABLE `%s`\n%s;", table, diffSql))
+			alter.SQL = append(alter.SQL, fmt.Sprintf("ALTER TABLE `%s`.`%s`\n%s;", database, table, diffSql))
 		}
 	} else {
-		alter.SQL = append(alter.SQL, fmt.Sprintf("ALTER TABLE `%s`\n%s;", table, strings.Join(diff, ",\n")))
+		alter.SQL = append(alter.SQL, fmt.Sprintf("ALTER TABLE `%s`.`%s`\n%s;", database, table, strings.Join(diff, ",\n")))
+	}
+
+	if sc.DestDb.dbDriver == DRIVER_CLICKHOUSE {
+		//dropSql := "drop table IF EXISTS %s.%s on cluster '%s';"
+		//createSql := "CREATE TABLE %s.%s on cluster '%s' AS " +
+		//	"%s.%s ENGINE =" +
+		//	"Distributed(%s, %s, %s, rand());"
 	}
 
 	return alter
@@ -121,19 +151,19 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) []string {
 		var alterSQL string
 		if destDt, has := destMyS.Fields.Get(el.Key); has {
 			if el.Value != destDt {
-				alterSQL = fmt.Sprintf("CHANGE `%s` %s", el.Key, el.Value)
+				alterSQL = fmt.Sprintf("%s %s", changeMap[sc.Config.DestType], el.Value)
 			}
 			beforeFieldName = el.Key.(string)
 		} else {
 			if len(beforeFieldName) == 0 {
 				if fieldCount == 0 {
-					alterSQL = "ADD " + el.Value.(string) + " FIRST"
+					alterSQL = addMap[sc.Config.DestType] + " " + el.Value.(string) + " FIRST"
 				} else {
-					alterSQL = "ADD " + el.Value.(string)
+					alterSQL = addMap[sc.Config.DestType] + " " + el.Value.(string)
 				}
 
 			} else {
-				alterSQL = "ADD " + el.Value.(string) + " AFTER " + beforeFieldName
+				alterSQL = addMap[sc.Config.DestType] + " " + el.Value.(string) + " AFTER " + beforeFieldName
 			}
 			beforeFieldName = el.Key.(string)
 		}
@@ -155,7 +185,7 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) []string {
 				continue
 			}
 			if _, has := sourceMyS.Fields.Get(name); !has {
-				alterSQL := fmt.Sprintf("drop `%s`", name)
+				alterSQL := fmt.Sprintf(dropMap[sc.Config.DestType]+" `%s`", name)
 				alterLines = append(alterLines, alterSQL)
 				log.Println("[Debug] check column.drop ", fmt.Sprintf("%s.%s", table, name), "alterSQL=", alterSQL)
 			} else {

@@ -71,7 +71,53 @@ func ParseSchema(schema string) *MySchema {
 		ForeignAll: make(map[string]*DbIndex),
 	}
 
-	for i := 1; i < len(lines)-1; i++ {
+	//for i := 1; i < len(lines)-1; i++ {
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		line = strings.TrimRight(line, ",")
+		if line[0] == '`' {
+			index := strings.Index(line[1:], "`")
+			name := line[1 : index+1]
+			mys.Fields.Set(name, line)
+			// log.Println("$$$$$$$$$$$$$$$$111111 = ", name)
+			// log.Printf("%+v\n", line)
+			// log.Println("$$$$$$$$$$$$$$$$222222")
+
+		} else {
+			idx := parseDbIndexLine(line)
+			if idx == nil {
+				continue
+			}
+			switch idx.IndexType {
+			case indexTypeForeignKey:
+				mys.ForeignAll[idx.Name] = idx
+			default:
+				mys.IndexAll[idx.Name] = idx
+			}
+		}
+	}
+	// fmt.Println(schema)
+	// fmt.Println(mys)
+	// fmt.Println("-----")
+	return mys
+
+}
+
+// ParseCHSchema parse table's schema
+func ParseCHSchema(schema string) *MySchema {
+	schema = strings.TrimSpace(schema)
+	lines := strings.Split(schema, "\n")
+	mys := &MySchema{
+		SchemaRaw:  schema,
+		Fields:     orderedmap.NewOrderedMap(),
+		IndexAll:   make(map[string]*DbIndex),
+		ForeignAll: make(map[string]*DbIndex),
+	}
+
+	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
@@ -116,6 +162,14 @@ func newSchemaDiff(table, source, dest string) *SchemaDiff {
 		Table:  table,
 		Source: ParseSchema(source),
 		Dest:   ParseSchema(dest),
+	}
+}
+
+func newCHSchemaDiff(table, source, dest string) *SchemaDiff {
+	return &SchemaDiff{
+		Table:  table,
+		Source: ParseCHSchema(source),
+		Dest:   ParseCHSchema(dest),
 	}
 }
 
